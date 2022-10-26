@@ -1,3 +1,17 @@
+# TODO: This file is impossible: run_Run3.py is in PixelMonitoring... So it will crash for sure!
+# Also see the following lines, without cd in between
+# python run_Run3.py -i run2_ls2_profiles/profile_r1d1rog1BpO_clean_ls2_wp1718.txt -o run2_ls2_run3_profiles/profile_r1d1rog1BpO_clean_run3_wp2m_run2123_l250.txt -w 2m -e 2023 -l 250 -p BpO -g 1 -r 1 -d 1 &
+# ./fpix_ls2_test ../PixelMonitoring/run2_ls2_run3_profiles/profile_r1d1rog1BpO_clean_run3_wp2m_run2123_l250.txt sim_r1d1rog1BpO_vdepl_clean_run3_wp2m_run2123_l250 1 1 &
+
+# TODO: fpix_ls2_test does no exist
+
+# TODO: fpix_ileak_test does no exist
+
+# TODO: python Vdepl_data.py, which Vdepl_data.py should be run? There are 2 with this name and 3 other duplicates with different names...
+# https://github.com/fleble/PixelRadiationDamageSimulation/tree/4e5dc51c6a0e228a4673f7e604b537d48a14c8a1
+
+# 
+
 python run_Run3.py -i run2_ls2_profiles/profile_r1d1rog1BpO_clean_ls2_wp1718.txt -o run2_ls2_run3_profiles/profile_r1d1rog1BpO_clean_run3_wp2m_run2123_l250.txt -w 2m -e 2023 -l 250 -p BpO -g 1 -r 1 -d 1 &
 python run_Run3.py -i run2_ls2_profiles/profile_r1d1rog1BpO_clean_ls2_wp1718.txt -o run2_ls2_run3_profiles/profile_r1d1rog1BpO_clean_run3_wp2m_run2124_l350.txt -w 2m -e 2024 -l 350 -p BpO -g 1 -r 1 -d 1 &
 python run_Run3.py -i run2_ls2_profiles/profile_r1d1rog1BpO_clean_ls2_wp1718.txt -o run2_ls2_run3_profiles/profile_r1d1rog1BpO_clean_run3_wp3m_run2123_l250.txt -w 3m -e 2023 -l 250 -p BpO -g 1 -r 1 -d 1 &

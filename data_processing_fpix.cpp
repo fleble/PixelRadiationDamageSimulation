@@ -1,3 +1,7 @@
+// TODO: Why is there a version for FPix and another version (for BPix?)
+// https://github.com/fleble/PixelRadiationDamageSimulation/blob/4e5dc51c6a0e228a4673f7e604b537d48a14c8a1/data_processing.cpp
+// https://github.com/fleble/PixelRadiationDamageSimulation/blob/4e5dc51c6a0e228a4673f7e604b537d48a14c8a1/data_processing_fpix.cpp
+
 /*
 Compile Code with: g++ data_processing.cpp -I /path/to/boost/boost_1_62_0 -Wall -std=c++11 -o output `root-config --cflags` `root-config --libs`
 

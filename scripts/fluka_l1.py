@@ -1,5 +1,7 @@
 from collections import namedtuple
     
+# TODO: This file is duplicated, it also exists in PixelMonitoring!
+# https://github.com/fleble/PixelMonitoring/blob/f45c6425b0bb57959a3910a0a26e3df494367759/FLUKA/fluka_l1.py
 
 PosFluence = namedtuple('PosFluence', 'r phi z fluence')
 fl_pos_dict = {

@@ -12,6 +12,8 @@ import numpy
 from fluka_l1 import fl_pos_dict
 from get_fluence import GetFlunce
 
+# TODO: This is file is duplicated 5 times, need to find the "correct" one...
+
 def mysort(list1, list2): #sort 2 lists by values in list1
     sorted_list1 = sorted(list1)
     sorted_list2 = [x for _, x in sorted(zip(list1, list2))]
