@@ -25,7 +25,7 @@ Attention 3: to change from one detector type to another, change mainly 3 things
 #include <sstream>         		// to get string into stream
 //#include <TH2F.h>           		// root stuff for file reading
 #include <TFile.h>          		// more root stuff
-#include <TH2D.h>           		// root stuff for file reading
+//#include <TH2D.h>           		// root stuff for file reading
 #include <TCanvas.h>
 #include <TROOT.h>
 #include <TGraphErrors.h>
@@ -36,6 +36,7 @@ Attention 3: to change from one detector type to another, change mainly 3 things
 #include <TMath.h>
 #include <TLine.h>
 #include <TH1.h>
+#include <TH2.h>
 #include <cmath>
 #include "TDatime.h"
 #include <time.h>
@@ -68,7 +69,7 @@ boost::posix_time::ptime t1(boost::posix_time::time_from_string(startTime));
 
 
 const double Ndonor_0 = 1.7e12;                      // IBL       // initial donor concentration (right now the code only works for originally n-type bulk material!)
-//const double Ndonor_0 = 1.4e12;                    // B-Layer Layer1/2 Disks
+// const double Ndonor_0 = 1.4e12;                    // B-Layer Layer1/2 Disks
 
 // double thickness=200;                                // IBL       // sensor thickness
 //double thickness=250;                              // B-Layer Layer1/2 Disks
@@ -83,8 +84,7 @@ double global_layer_conversion=6.262e12;             // IBL
 
 int limit_file_size_input = 0;                       // how many lines should be read from the profile, 0 for everything
 
-float DoseRateScaling=0.0859955711871/8.9275E-02; //temporary scaling for bpix
-// float DoseRateScaling=0.0859955711871/8.9275E-02;                            // this parameter is multiplied to all fluence rates from the input profile
+float DoseRateScaling=1.;                            // this parameter is multiplied to all fluence rates from the input profile
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Do not change things below this line without thinking carefully!
 
@@ -100,8 +100,12 @@ TF1 *Ndonor_neutrals_rev_TF1_approx = new TF1("Ndonor_rev1_TF1","[0]*[1]*x+[3]*T
 
 TF1 *Ndonor_TF1 = new TF1("Ndonor_TF1","[0]*[1]/[2] * ([2]*x+TMath::Exp(-[2]*x)-1) +[3]*(1-TMath::Exp(-[2]*x)) ",0,10000000);
 TF1 *Ndonor_g1_TF1 = new TF1("Ndonor_TF1","[0]/[1] * ([1]*x+TMath::Exp(-[1]*x)-1) +[2]*(1-TMath::Exp(-[1]*x)) ",0,10000000);
+
 TFile *fin = TFile::Open("../PixelMonitoring/FLUKA/fluence_field.root");
 TH2F *fluence = (TH2F*)fin->Get("fluence_allpart_6500GeV_phase1");
+const double ppXS = 79.1;
+const double conversionFactor=ppXS*10e-15/10e-27;
+
 struct DataElement
 {
     int duration;
@@ -129,8 +133,11 @@ double NtoV_function(double doping_conc)
     return 1.6021766208e-13/(2*11.68*8.854187817)*fabs(doping_conc)*thickness*thickness;                // q/2*epsilon*epsilon_0 * Neff*D^2
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+double VtoN_function(double V)
+{
+    // return 1.6021766208e-13/(2*11.68*8.854187817)*fabs(doping_conc)*thickness*thickness;                // q/2*epsilon*epsilon_0 * Neff*D^2
+    return V/(1.6021766208e-13/(2*11.68*8.854187817)*thickness*thickness);
+}
 
 double getPhi_eq(double r0, double z0, double phi_aver, double Fluka_aver){
   double phi_eq = fluence->GetBinContent(fluence->GetXaxis()->FindBin(r0),fluence->GetYaxis()->FindBin(z0));
@@ -149,6 +156,8 @@ double getFluka_aver(double r0, double z0){
   }
   return phi_eq*dr/(2*R);
 }
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 class Annealing_constants {                                         // Class to store a set of annealing specific constants and compute temperature dependent values
 private:
@@ -248,21 +257,32 @@ struct leakage_current_consts
 class Sensor                    //Class to handle Sensors
 {
 private:							//Content of a sensor
-	double Nacceptor;
-	double Ndonor;
-  double Ndonor_const;
-  double Nacceptor_reversible;
-  double Nneutral_reversible;
-  double Nacceptor_stable_constdamage;
-  double Ndonor_stable_donorremoval;
-  double Nacceptor_stable_reverseannealing;
+	double Nacceptor[64];
+	double Ndonor[64];
+  double Ndonor_const[64];
+  double Nacceptor_reversible[64];
+  double Nneutral_reversible[64];
+  double Nacceptor_stable_constdamage[64];
+  double Ndonor_stable_donorremoval[64];
+  double Nacceptor_stable_reverseannealing[64];
 
-  double Nbenef_anneal_g1;
-  double Nrevers_anneal_g1;
-  double Nnadefects_g1;
-  double Nconstdamage_g1;
+  double Nbenef_anneal_g1[64];
+  double Nrevers_anneal_g1[64];
+  double Nnadefects_g1[64];
+  double Nconstdamage_g1[64];
 
-	int Temperature;
+  double Fluence[64];
+  
+  double Nbenef_anneal[64];
+  double Nrevers_anneal[64];
+  double Nnadefects[64];
+  double Nconstdamage[64];
+
+  // double Nconstdamage[64];
+  // double Nbenef_anneal[64];
+  // double Nnadefects[64];
+
+  int Temperature;
   vector<vector<double>> leakage_current_alpha;
   vector<vector<double>> time_history;
   vector<double> G_i;
@@ -276,58 +296,78 @@ private:							//Content of a sensor
 public:
 	Sensor(double, double, int, double, double);		    //Constructor
   Sensor();
-	double get_Neff() const;
+	double get_Neff(int) const;
   void set_Nacceptor(double);
   void set_Ndonor(double);
-  double get_Nacceptor() const;
-  double get_Ndonor() const;
+  double get_Nacceptor(int) const;
+  double get_Ndonor(int) const;
 
   void set_temp(int);
   double get_temp() const;
-  void irradiate(leakage_current_consts,Annealing_constants, long int, float, long double);
+  void irradiate(leakage_current_consts,Annealing_constants, long int, float, long double,int,int);
   vector<double> get_G_i() const;
   vector<double> get_leakage_current() const;
   vector<double> get_alpha_vec() const;
   vector<double> get_powerconsumption() const;
 
-  double get_Ndonor_const() const;
-  double get_Nbenef_anneal_g1() const;
-  double get_Nrevers_anneal_g1() const;
-  double get_Nnadefects_g1() const;
-  double get_Nconstdamage_g1() const;
+  double get_Ndonor_const(int) const;
+  double get_Nbenef_anneal_g1(int) const;
+  double get_Nrevers_anneal_g1(int) const;
+  double get_Nnadefects_g1(int) const;
+  double get_Nconstdamage_g1(int) const;
   // double get_Ndonor_const() const;
-  double get_Ndonor_stable_donorremoval() const;
+  double get_Ndonor_stable_donorremoval(int) const;
+  double get_fluence(int);
 };
 
 Sensor::Sensor( double a, double b, int c, double d, double e)	//Constructordefinition
 {
-  Nacceptor=a;
-  Ndonor=b;
-  Temperature=c;
-  Nacceptor_reversible=d;
-  Nneutral_reversible=e;
+  // Nacceptor=a;
+  // Ndonor=b;
+  // Temperature=c;
+  // Nacceptor_reversible=d;
+  // Nneutral_reversible=e;
 }
 
 Sensor::Sensor()	//Constructordefinition
 {
-  Nacceptor=0;
-  Ndonor=Ndonor_0;
   Temperature=0;
-  Nneutral_reversible=0;
-  Nacceptor_reversible=0;
-  Nnadefects_g1=0;
+  // Nneutral_reversible=0;
+  // Nacceptor_reversible=0;
+  // Nnadefects_g1=0;
   // Nneutral_reversible=0;
   // volume= 0.135;
   volume=0.0285*6.48*1.62;
-  Nacceptor_stable_constdamage=0;
-  Ndonor_stable_donorremoval=donorremovalfraction*fabs(Nacceptor-Ndonor);
-  Ndonor_const=Ndonor-Ndonor_stable_donorremoval;
-  Nacceptor_stable_reverseannealing=0;
+  for(int i = 0; i < 64; i++){
+    Nacceptor[i]=0.;
+    Nacceptor_stable_constdamage[i]=0.;
+    
+    Ndonor[i]=VtoN_function(70.);
+    Nbenef_anneal_g1[i] = 0.;
+    Nrevers_anneal_g1[i] = 0.;
+    Nnadefects_g1[i] = 0.;
+    Nconstdamage_g1[i] = 1.;
+
+    Nbenef_anneal[i] = 0.;
+    Nrevers_anneal[i] = 0.;
+    Nnadefects[i] = 0.;
+    Nconstdamage[i] = 0.;
+
+    Nacceptor_reversible[i] = 0.;
+    Nneutral_reversible[i]=0.;
+    // Nconstdamage[i] = 0;
+    // Nbenef_anneal[i] = 0;
+    // Nnadefects[i] = 0;
+  
+    Ndonor_stable_donorremoval[i]=donorremovalfraction*fabs(Nacceptor[i]-Ndonor[i]);
+    Ndonor_const[i]=Ndonor[i]-Ndonor_stable_donorremoval[i];
+    Nacceptor_stable_reverseannealing[i]=0;
+  }
 }
 
-double Sensor::get_Neff() const
+double Sensor::get_Neff(int i) const
 {
-	return Nacceptor-Ndonor;
+	return Nacceptor[i]-Ndonor[i];
 }
 
 double Sensor::get_temp() const
@@ -341,30 +381,30 @@ void Sensor::set_temp(int value)
   return;
 }
 
-double Sensor::get_Nacceptor() const
+double Sensor::get_Nacceptor(int i) const
 {
-  return Nacceptor;
+  return Nacceptor[i];
 }
 
-double Sensor::get_Ndonor() const
+double Sensor::get_Ndonor(int i) const
 {
-  return Ndonor;
+  return Ndonor[i];
 }
 
-double Sensor::get_Ndonor_const() const
+double Sensor::get_Ndonor_const(int i) const
 {
-  return Ndonor_const;
+  return Ndonor_const[i];
 }
 
 void Sensor::set_Nacceptor(double new_value)
 {
-  Nacceptor=new_value;
+  for(int i = 0; i < 64; i++) Nacceptor[i]=new_value;
   return;
 }
 
 void Sensor::set_Ndonor(double new_value)
 {
-  Ndonor=new_value;
+  for(int i = 0; i < 64; i++) Ndonor[i]=new_value;
   return;
 }
 
@@ -383,116 +423,184 @@ vector<double> Sensor::get_alpha_vec() const
   return alpha_vec;
 }
 
-vector<double> Sensor::get_powerconsumption() const
-{
+vector<double> Sensor::get_powerconsumption() const{
   return powerconsumption;
 }
 
-double Sensor::get_Nbenef_anneal_g1() const{
-  return Nbenef_anneal_g1;
+double Sensor::get_Nbenef_anneal_g1(int i) const{
+  return Nbenef_anneal_g1[i];
 }
-double Sensor::get_Nrevers_anneal_g1() const{
-  return Nrevers_anneal_g1;
+double Sensor::get_Nrevers_anneal_g1(int i) const{
+  return Nrevers_anneal_g1[i];
 }
-double Sensor::get_Nnadefects_g1() const{
-  return Nnadefects_g1;
-}
-
-double Sensor::get_Nconstdamage_g1() const{
-  return Nconstdamage_g1;
+double Sensor::get_Nnadefects_g1(int i) const{
+  return Nnadefects_g1[i];
 }
 
-double Sensor::get_Ndonor_stable_donorremoval() const{
-  return Ndonor_stable_donorremoval;
+double Sensor::get_Nconstdamage_g1(int i) const{
+  return Nconstdamage_g1[i];
 }
 
-void Sensor::irradiate(leakage_current_consts leconsts, Annealing_constants constants,long int phi, float t, long double totalDose)
+double Sensor::get_Ndonor_stable_donorremoval(int i) const{
+  return Ndonor_stable_donorremoval[i];
+}
+
+double Sensor::get_fluence(int i){
+  return Fluence[i];
+}
+
+void Sensor::irradiate(leakage_current_consts leconsts, Annealing_constants constants,long int phi, float t, long double totalDose, int ring_number, int disk_number)
 {
   //t=t*3600;                                                                     //conversion from hours to seconds
   double a=1e-30;
   //calculating the effective doping concentration
   // debug=1;
   if(debug) cout << t<<" "<< constants.get_gA(Temperature)<<" "<<phi<<" "<<constants.get_ka(Temperature)<<" "<<Nacceptor<<" "<< constants.get_gC(Temperature)<<" "<< constants.get_gY(Temperature)<<" "<< constants.get_ky1(Temperature) <<" "<<Ndonor <<endl;
-  
-  //
-  // phi/= 4.;
-  //
-  double R0 = 7.81;
+
+  // Naccept_rev_TF1->SetParameter(0,constants.get_gA(Temperature));
+  // Naccept_rev_TF1->SetParameter(1,phi);
+  // Naccept_rev_TF1->SetParameter(2,constants.get_ka(Temperature));
+  // Naccept_rev_TF1->SetParameter(3,Nacceptor_reversible);
+
+  // Naccept_rev_TF1_approx->SetParameter(0,constants.get_gA(Temperature));
+  // Naccept_rev_TF1_approx->SetParameter(1,phi);
+  // Naccept_rev_TF1_approx->SetParameter(2,constants.get_ka(Temperature));
+  // Naccept_rev_TF1_approx->SetParameter(3,Nacceptor_reversible);
+
+  // Naccept_const_TF1->SetParameter(0,constants.get_gC(Temperature));
+  // Naccept_const_TF1->SetParameter(1,phi);
+
+  // Nneutrals_rev_TF1->SetParameter(0,constants.get_gY(Temperature));
+  // Nneutrals_rev_TF1->SetParameter(1,phi);
+  // Nneutrals_rev_TF1->SetParameter(2,constants.get_ky1(Temperature));
+  // Nneutrals_rev_TF1->SetParameter(3,Nneutral_reversible);
+
+  // Ndonor_neutrals_rev_TF1_approx->SetParameter(0,constants.get_gY(Temperature));
+  // Ndonor_neutrals_rev_TF1_approx->SetParameter(1,phi);
+  // Ndonor_neutrals_rev_TF1_approx->SetParameter(2,constants.get_ky1(Temperature));
+  // Ndonor_neutrals_rev_TF1_approx->SetParameter(3,Nneutral_reversible);
+
+  // Ndonor_const_TF1->SetParameter(0,Ndonor_stable_donorremoval);
+  // Ndonor_const_TF1->SetParameter(1,constants.get_cc());
+  // Ndonor_const_TF1->SetParameter(2,phi);
+
+  // Ndonor_TF1->SetParameter(0,constants.get_gY(Temperature));
+  // Ndonor_TF1->SetParameter(1,phi);
+  // Ndonor_TF1->SetParameter(2,constants.get_ky1(Temperature));
+  // Ndonor_TF1->SetParameter(3,Nneutral_reversible);
+
+
+  // if(constants.get_ka(Temperature)>a && constants.get_ky1(Temperature)>a)
+  // {
+  //   Nacceptor_reversible             =  Naccept_rev_TF1->Eval(t);
+  //   Nacceptor_stable_constdamage     +=  Naccept_const_TF1->Eval(t);
+  //   Nneutral_reversible              =  Nneutrals_rev_TF1->Eval(t);
+  //   Ndonor_stable_donorremoval       += Ndonor_const_TF1->Eval(t);
+  //   Nacceptor_stable_reverseannealing   +=  Ndonor_TF1->Eval(t);
+  // }
+  // else
+  // {
+  //   cout << "Potential numerical problem due to ultra low temp and therby caused very small ky1 and ka values. Using approach in order to perform calculation. In general, no problem!"<<endl;
+
+  //   Nacceptor_reversible           =  Naccept_rev_TF1_approx->Eval(t);
+  //   Nacceptor_stable_constdamage   +=  Naccept_const_TF1->Eval(t);
+  //   Nneutral_reversible            =  Ndonor_neutrals_rev_TF1_approx->Eval(t);
+  //   Ndonor_stable_donorremoval     += Ndonor_const_TF1->Eval(t);
+  //   Nacceptor_stable_reverseannealing +=  Ndonor_TF1->Eval(t);
+  // }
+  // int ring_number = 1;
+  double R0_arr[] = {7.81,12.8};
+  double R0 = R0_arr[ring_number-1];
   double R = 6.4/2.;
   double dr = 0.1;
-  double r = R0 - R + dr/2+30*dr;
-  const double z0 = -32.;
+  double r = R0 - R + dr/2;
+  const double z0_arr[] = {32.,40,-50};
+  const double z0 = z0_arr[disk_number-1];
   double phi_aver = phi;
   // double Fluka_aver = getFluka_aver(R0, z0);
-  double Fluka_aver = 0.07340012983430498;
+  // double Fluka_aver = 0.07340012983430498;
+  // double number_of_modules = 6.;
+  // double Fluka_aver *= number_of_modules;
   double phiR = 0;
   double phi_aver_check = 0;
-  // phi = getPhi_eq(r,z0,phi_aver,Fluka_aver);
-  // phi *= (0.0859955711871/8.9275E-02); //(why 8.9275E-02 ???)
+  double Fl[2][3] = {{0.11018473739781773,0,0.10041538383064354}, {0,0,0.0655143577993537}};
+  double Fl0[2][3] = {{0.11018473739781773,0,0.10041538383064354}, {0,0,1.791875334396497e-15}};
+  double Fluka_0slice = Fl[ring_number-1][disk_number-1];
+  double Fluka_aver = Fl[ring_number-1][disk_number-1];
+  // cout << Fluka_aver << endl;
+  // cout << "phi_aver = " << phi_aver << endl;
+  for(int i = 0; i < 64; i++){
+    phiR = getPhi_eq(r,z0,phi_aver,Fluka_aver);
+    // if(i==0){
+    //   cout << "phiR: " << phiR << " == ";
+    //   phiR = phi_aver*Fluka_0slice;
+    //   cout << phiR << endl;
+    // }
+    Fluence[i] = phiR;
+    // cout << "r: " << r << " ->" << phiR << endl;
+    // phi_aver_check += phiR;
+    // cout << "phiR(" << i << ") = " << phi << endl;
+    Naccept_rev_TF1->SetParameter(0,constants.get_gA(Temperature));
+    Naccept_rev_TF1->SetParameter(1,phiR);
+    Naccept_rev_TF1->SetParameter(2,constants.get_ka(Temperature));
+    Naccept_rev_TF1->SetParameter(3,Nacceptor_reversible[i]);
 
-  Naccept_rev_TF1->SetParameter(0,constants.get_gA(Temperature));
-  Naccept_rev_TF1->SetParameter(1,phi);
-  Naccept_rev_TF1->SetParameter(2,constants.get_ka(Temperature));
-  Naccept_rev_TF1->SetParameter(3,Nacceptor_reversible);
+    Naccept_const_TF1->SetParameter(0,constants.get_gC(Temperature));
+    Naccept_const_TF1->SetParameter(1,phiR);
 
-  Naccept_rev_TF1_approx->SetParameter(0,constants.get_gA(Temperature));
-  Naccept_rev_TF1_approx->SetParameter(1,phi);
-  Naccept_rev_TF1_approx->SetParameter(2,constants.get_ka(Temperature));
-  Naccept_rev_TF1_approx->SetParameter(3,Nacceptor_reversible);
+    Nneutrals_rev_TF1->SetParameter(0,constants.get_gY(Temperature));
+    Nneutrals_rev_TF1->SetParameter(1,phiR);
+    Nneutrals_rev_TF1->SetParameter(2,constants.get_ky1(Temperature));
+    Nneutrals_rev_TF1->SetParameter(3,Nneutral_reversible[i]);
 
-  Naccept_const_TF1->SetParameter(0,constants.get_gC(Temperature));
-  Naccept_const_TF1->SetParameter(1,phi);
+    Ndonor_const_TF1->SetParameter(0,Ndonor_stable_donorremoval[i]);
+    Ndonor_const_TF1->SetParameter(1,constants.get_cc());
+    Ndonor_const_TF1->SetParameter(2,phiR);
 
-  Nneutrals_rev_TF1->SetParameter(0,constants.get_gY(Temperature));
-  Nneutrals_rev_TF1->SetParameter(1,phi);
-  Nneutrals_rev_TF1->SetParameter(2,constants.get_ky1(Temperature));
-  Nneutrals_rev_TF1->SetParameter(3,Nneutral_reversible);
+    Ndonor_TF1->SetParameter(0,constants.get_gY(Temperature));
+    Ndonor_TF1->SetParameter(1,phi);
+    Ndonor_TF1->SetParameter(2,constants.get_ky1(Temperature));
+    Ndonor_TF1->SetParameter(3,Nneutral_reversible[i]);
 
-  Ndonor_neutrals_rev_TF1_approx->SetParameter(0,constants.get_gY(Temperature));
-  Ndonor_neutrals_rev_TF1_approx->SetParameter(1,phi);
-  Ndonor_neutrals_rev_TF1_approx->SetParameter(2,constants.get_ky1(Temperature));
-  Ndonor_neutrals_rev_TF1_approx->SetParameter(3,Nneutral_reversible);
-
-  Ndonor_const_TF1->SetParameter(0,Ndonor_stable_donorremoval);
-  Ndonor_const_TF1->SetParameter(1,constants.get_cc());
-  Ndonor_const_TF1->SetParameter(2,phi);
-
-  Ndonor_TF1->SetParameter(0,constants.get_gY(Temperature));
-  Ndonor_TF1->SetParameter(1,phi);
-  Ndonor_TF1->SetParameter(2,constants.get_ky1(Temperature));
-  Ndonor_TF1->SetParameter(3,Nneutral_reversible);
+    Nacceptor_reversible[i]             =  Naccept_rev_TF1->Eval(t);
+    Nacceptor_stable_constdamage[i]     +=  Naccept_const_TF1->Eval(t);
+    Nneutral_reversible[i]              =  Nneutrals_rev_TF1->Eval(t);
+    Ndonor_stable_donorremoval[i]       += Ndonor_const_TF1->Eval(t);
+    Nacceptor_stable_reverseannealing[i]   +=  Ndonor_TF1->Eval(t);
 
 
-  if(constants.get_ka(Temperature)>a && constants.get_ky1(Temperature)>a)
-  {
-    Nacceptor_reversible             =  Naccept_rev_TF1->Eval(t);
-    Nacceptor_stable_constdamage     +=  Naccept_const_TF1->Eval(t);
-    Nneutral_reversible              =  Nneutrals_rev_TF1->Eval(t);
-    Ndonor_stable_donorremoval       += Ndonor_const_TF1->Eval(t);
-    Nacceptor_stable_reverseannealing   +=  Ndonor_TF1->Eval(t);
+    // Nconstdamage[i] += Naccept_const_TF1->Eval(t);
+    // Nbenef_anneal[i] =  Naccept_rev_TF1->Eval(t);
+    // Nrevers_anneal_g1[i] 
+    // Nneutral_reversible[i] = Nneutrals_rev_TF1->Eval(t);
+    // Nacceptor_reversible[i]
+    // Nconstdamage_g1[i] = Nconstdamage[i]/constants.get_gC(Temperature);
+    // Nacceptor_stable_constdamage[i] = Nconstdamage[i];
+    // Nacceptor_stable_reverseannealing[i] = Ndonor_TF1->Eval(t);
+    // Nbenef_anneal_g1[i] = Nbenef_anneal[i]/constants.get_gA(Temperature);
+    // Ndonor_g1_TF1->SetParameter(0,phiR);
+    // Ndonor_g1_TF1->SetParameter(1,constants.get_ky1(Temperature));
+    // Ndonor_g1_TF1->SetParameter(2,Nnadefects_g1[i]);
+    // Nrevers_anneal_g1[i] += Ndonor_g1_TF1->Eval(t);
+    // Nnadefects_g1[i] = Nneutral_reversible[i]/constants.get_gY(Temperature);;
+    // Ndonor_stable_donorremoval[i] += Ndonor_const_TF1->Eval(t);
+
+    Nconstdamage_g1[i]   = Nacceptor_stable_constdamage[i]/constants.get_gC(Temperature);
+    Nbenef_anneal_g1[i]  = Nacceptor_reversible[i]/constants.get_gA(Temperature);
+    Ndonor_g1_TF1->SetParameter(0,phiR);
+    Ndonor_g1_TF1->SetParameter(1,constants.get_ky1(Temperature));
+    Ndonor_g1_TF1->SetParameter(2,Nnadefects_g1[i]);
+    Nrevers_anneal_g1[i] += Ndonor_g1_TF1->Eval(t);
+    Nnadefects_g1[i]     = Nneutral_reversible[i]/constants.get_gY(Temperature);
+    
+    Nacceptor[i] =  Nbenef_anneal[i] + Nacceptor_stable_constdamage[i] + Nacceptor_stable_reverseannealing[i];
+    Ndonor[i]    =  Ndonor_const[i]         + Ndonor_stable_donorremoval[i];
+    
+    r += dr;
   }
-  else
-  {
-    cout << "Potential numerical problem due to ultra low temp and therby caused very small ky1 and ka values. Using approach in order to perform calculation. In general, no problem!"<<endl;
-
-    Nacceptor_reversible           =  Naccept_rev_TF1_approx->Eval(t);
-    Nacceptor_stable_constdamage   +=  Naccept_const_TF1->Eval(t);
-    Nneutral_reversible            =  Ndonor_neutrals_rev_TF1_approx->Eval(t);
-    Ndonor_stable_donorremoval     += Ndonor_const_TF1->Eval(t);
-    Nacceptor_stable_reverseannealing +=  Ndonor_TF1->Eval(t);
-  }
-
-  Nconstdamage_g1   = Nacceptor_stable_constdamage/constants.get_gC(Temperature);
-  Nbenef_anneal_g1  = Nacceptor_reversible/constants.get_gA(Temperature);
-  Ndonor_g1_TF1->SetParameter(0,phi);
-  Ndonor_g1_TF1->SetParameter(1,constants.get_ky1(Temperature));
-  Ndonor_g1_TF1->SetParameter(2,Nnadefects_g1);
-  Nrevers_anneal_g1 += Ndonor_g1_TF1->Eval(t);
-  Nnadefects_g1     = Nneutral_reversible/constants.get_gY(Temperature);
-
+  // cout << "phi_aver_check:" << phi_aver_check/64. << " = " << phi/4. << endl;
   // cout << "ka = " << constants.get_ka(Temperature) << "; ky1 = " << constants.get_ky1(Temperature) << ": " << NtoV_function(Nacceptor_stable_reverseannealing) << " = " << NtoV_function(Nacceptor_stable_reverseannealing_g) << "+" << NtoV_function(Nacceptor_stable_reverseannealing_no_g) <<  endl;
-  Nacceptor =  Nacceptor_reversible + Nacceptor_stable_constdamage + Nacceptor_stable_reverseannealing;
-  Ndonor    =  Ndonor_const         + Ndonor_stable_donorremoval;
+  
 
 
 //calculating the leackage current in the following part
@@ -602,7 +710,7 @@ void Sensor::irradiate(leakage_current_consts leconsts, Annealing_constants cons
   else alpha_vec.push_back(G_i_tmp/(totalDose+(double)phi+0.001));
 
   leakage_current.push_back(G_i_tmp*1000.0*thickness*1.e-4);                                      //insert volume here for current per module
-  powerconsumption.push_back(leakage_current.back()*NtoV_function(get_Neff()));
+  powerconsumption.push_back(leakage_current.back()*NtoV_function(get_Neff(0)));
 
   return;
 }
@@ -696,6 +804,9 @@ void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string
 
     if(mode==1 || mode==2 || mode==66 || mode==8 || mode==888 || mode==999) //in case of plot as a function of time, convert the days from simulation into a more handy date
     {
+        // cout << "AAAAAAA1!!!!" << endl;
+        // cout << "AAAAAAA2!!!!" << endl;
+        
         for(int k=0; k<vecx.size();k++)
         {
             int day=vecx.at(k);
@@ -721,6 +832,7 @@ void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string
 
             vecx.at(k)=da.Convert();
         }
+        
     }
     else  //otherwise the axis is fluence and we need to reconvert it since for safty reasons it was stored devided by 1e6 in order not to overflow the long double
     {
@@ -816,7 +928,7 @@ void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string
     gStyle->SetOptTitle(0);
 
     TGraphErrors *gr = new TGraphErrors(t_timevector,t_vdepvector,t_time_error,t_vdep_error);
-
+    
     if(mode==1 || mode==2 || mode==66 || mode==8 || mode==888 || mode==999) //in case of plot as a function of time, convert the days from simulation into a more handy date
     {
         gr->GetXaxis()->SetRangeUser(1488326400.,1577836799.);
@@ -857,6 +969,7 @@ void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string
 
     file->Close();
     delete c1;
+    
 }
 
 
@@ -866,18 +979,19 @@ void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string
 
 int main(int argc, char *argv[]) {
 
-    if(argc!=3)                                                 		// Check for correct number of arguments
+    if(argc!=5)                                                 		// Check for correct number of arguments
     {
         cout << "Wrong number of arguments! There are: " << argc << " arguments." << endl;
         return -1;
     }
-
+    
     string output_file_name = argv[2];
-
+    int ring_number = TString(argv[3]).Atoi();
+    int disk_number = TString(argv[4]).Atoi();
     if(!overwrite_files)
     {
         time_t current_time = time(nullptr);
-        // output_file_name.insert(output_file_name.size(),to_string(current_time));
+        output_file_name.insert(output_file_name.size(),to_string(current_time));
     }
 
     string profilinput_file_name = argv[1];
@@ -889,10 +1003,9 @@ int main(int argc, char *argv[]) {
                                     1.11,       //E1
                                     1.3};       //E1_star
 
-    Annealing_constants AnCo( 1.4e-2,           //atof(argv[2]),       //gA
-                              6.7e-2,           //atof(argv[3]),       //gY
-                              // 0.7e-2,           //atof(argv[4]),       //gC
-                              0.0061566116294,           //atof(argv[4]),       //gC
+    Annealing_constants AnCo( 0.7e-2,           //atof(argv[2]),       //gA
+                              6.0e-2,           //atof(argv[3]),       //gY
+                              0.7e-2,           //atof(argv[4]),       //gC
                               2.4e13,           //ka
                               7.4e14,           //ky
                               1.09,             //Ea
@@ -901,20 +1014,20 @@ int main(int argc, char *argv[]) {
 
     //DoseRateScaling = atof(argv[5]) ;
 
-fluence_2018_begin = nconst_begin_2018/gC_lin
+
     vector<DataElement> temp_rad_profile = get_Profile(profilinput_file_name);    //read in the input data profile, a vector containing the individual data elements (duration, temperature, dose rate) is returned
 
     int max_steps=temp_rad_profile.size();
     // int max_steps=100;
-    vector<double> V_dep_vector;
-    vector<double> Neff_vector;
+    vector<double> V_dep_vector[64];
+    vector<double> Neff_vector[64];
     vector<double> Ndonor_vector;
     vector<double> Nacceptor_vector;
     vector<double> Temperature_vector;
     vector<double> cpTemperature_vector;
 
     vector<double> time_vector;
-    vector<double> fluence_vector;
+    vector<double> fluence_vector[64];
     vector<double> flux_vector;
 
     vector<double> time_vector_data;
@@ -922,11 +1035,15 @@ fluence_2018_begin = nconst_begin_2018/gC_lin
     vector<double> iLeak_data;
     vector<double> diLeak_data;
 
-    vector<double> N_benef_anneal_g1_vec;
-    vector<double> N_revers_anneal_g1_vec;
-    vector<double> N_nadefects_g1_vec;
-    vector<double> N_constdamage_g1_vec;
-    vector<double> N_donor_vec;
+    vector<double> N_benef_anneal_g1_vec[64];
+    vector<double> N_revers_anneal_g1_vec[64];
+    vector<double> N_nadefects_g1_vec[64];
+    vector<double> N_constdamage_g1_vec[64];
+    vector<double> N_donor_vec[64];
+    double fluence_arr[64];
+    for(int i = 0; i < 64; i++){
+      fluence_arr[i] = 0;
+    }
     // vector<double> N_donor_stable_donorremoval;
 
     Sensor *sensor = new Sensor();
@@ -1019,46 +1136,44 @@ fluence_2018_begin = nconst_begin_2018/gC_lin
     //     gA_float += gA_step;
     //   }
     // }
-
     for (int t=0; t<max_steps; t++)   // iterate through the profile and irradiate the sensor at each step
     {
         sensor->set_temp(temp_rad_profile.at(t).temperature);
-        sensor->irradiate(LeCo,AnCo,temp_rad_profile.at(t).dose_rate,temp_rad_profile.at(t).duration,totalDose);
-
+        sensor->irradiate(LeCo,AnCo,temp_rad_profile.at(t).dose_rate,temp_rad_profile.at(t).duration,totalDose,ring_number,disk_number);
         Temperature_vector.push_back(temp_rad_profile.at(t).temperature);
         cpTemperature_vector.push_back(temp_rad_profile.at(t).coolPipeTemp);
-        Neff_vector.push_back(sensor->get_Neff());
-        V_dep_vector.push_back(NtoV_function(sensor->get_Neff()));
-        Ndonor_vector.push_back(sensor->get_Ndonor());
-        Nacceptor_vector.push_back(sensor->get_Nacceptor());
+        
+        // Ndonor_vector.push_back(sensor->get_Ndonor());
+        Nacceptor_vector.push_back(sensor->get_Nacceptor(0));
         // cout << AnCo.get_gY(temp_rad_profile.at(t).temperature);
-
-        N_benef_anneal_g1_vec.push_back(sensor->get_Nbenef_anneal_g1());
-        N_revers_anneal_g1_vec.push_back(sensor->get_Nrevers_anneal_g1());
-        N_nadefects_g1_vec.push_back(sensor->get_Nnadefects_g1());
-        N_constdamage_g1_vec.push_back(sensor->get_Nconstdamage_g1());
-        N_donor_vec.push_back(sensor->get_Ndonor());
+        
+        
+        for(int i = 0; i < 64; i++){
+          fluence_arr[i] += sensor->get_fluence(i);
+          N_benef_anneal_g1_vec[i].push_back(sensor->get_Nbenef_anneal_g1(i));
+          N_revers_anneal_g1_vec[i].push_back(sensor->get_Nrevers_anneal_g1(i));
+          N_nadefects_g1_vec[i].push_back(sensor->get_Nnadefects_g1(i));
+          N_constdamage_g1_vec[i].push_back(sensor->get_Nconstdamage_g1(i));
+          N_donor_vec[i].push_back(sensor->get_Ndonor(i));
+          Neff_vector[i].push_back(sensor->get_Neff(i));
+          V_dep_vector[i].push_back(NtoV_function(sensor->get_Neff(i)));
+          fluence_vector[i].push_back(fluence_arr[i]);
+        }
         // N_donor_stable_donorremoval.push_back(NtoV_function(sensor->get_Ndonor_stable_donorremoval()));
-        // 14722058.0
-        // 16450058.0
-        // 45480458.0
-        // 48504458.0
+
         // totalDose+=temp_rad_profile.at(t).dose_rate/1.0e3*temp_rad_profile.at(t).duration/1.0e3;  // time (seconds) * dose rate (neq/cm2/s)
         totalDose+=double(temp_rad_profile.at(t).dose_rate)*double(temp_rad_profile.at(t).duration);
         time+=temp_rad_profile.at(t).duration;
         // cout << temp_rad_profile.at(t).duration << endl;
-        // if(temp_rad_profile.at(t).iLeak_data > 0.){
-        if(temp_rad_profile.at(t).iLeak_data > 0. && temp_rad_profile.at(t).duration == 1200 
-            && (time < 14722058 || (time > 16450058 && time < 45480458) || time > 48504458)){
-          // cout << time << endl;
+        if(temp_rad_profile.at(t).iLeak_data > 0. && temp_rad_profile.at(t).duration == 1200){
           time_vector_data.push_back(time/(24.0*3600.0));
-          fluence_vector_data.push_back(totalDose/6.);
+          fluence_vector_data.push_back(totalDose);
           iLeak_data.push_back(temp_rad_profile.at(t).iLeak_data/1000.);
           diLeak_data.push_back(temp_rad_profile.at(t).diLeak_data/1000.);
           flux_vector.push_back(temp_rad_profile.at(t).dose_rate);
         }
         time_vector.push_back(time/(24.0*3600.0));  // time vector in days
-        fluence_vector.push_back(totalDose);
+        // fluence_vector.push_back(totalDose);
         // cout << t << ": " << fluence_vector.at(t) << endl;
         // fluence_vector.push_back(totalDose*1.0e6);
         // if(t%(int)(max_steps/100.)==0) cout << (int)((int)t*100./max_steps) << " percent done..." << endl;
@@ -1068,46 +1183,57 @@ fluence_2018_begin = nconst_begin_2018/gC_lin
     cout << "Processing finished, writing data..." << endl;
 
     // plots as function of time
-    plot_vectors(time_vector,Neff_vector,"N_{eff} [1/cm^{3}]","Date [days]",totalDose,"Neff",1,output_file_name);
-    plot_vectors(time_vector,Ndonor_vector,"N_{donor} [1/cm^{3}]","Date [days]",totalDose,"Ndonors",2,output_file_name);
-    plot_vectors(time_vector,Nacceptor_vector,"N_{acceptor} [1/cm^{3}]","Date [days]",totalDose,"Nacceptors",2,output_file_name);
-    plot_vectors(time_vector,V_dep_vector,"U_{dep} [V]","Date [days]",totalDose,"U_dep",66,output_file_name);
+    // plot_vectors(time_vector,Neff_vector,"N_{eff} [1/cm^{3}]","Date [days]",totalDose,"Neff",1,output_file_name);
+    // plot_vectors(time_vector,Ndonor_vector,"N_{donor} [1/cm^{3}]","Date [days]",totalDose,"Ndonors",2,output_file_name);
+    // plot_vectors(time_vector,Nacceptor_vector,"N_{acceptor} [1/cm^{3}]","Date [days]",totalDose,"Nacceptors",2,output_file_name);
+    // plot_vectors(time_vector,V_dep_vector,"U_{dep} [V]","Date [days]",totalDose,"U_dep",66,output_file_name);
+    for(int i = 0; i < 64; i++){
+      TString str1 = TString("N_benef_anneal_g1_")+TString::Itoa(i,10);
+      TString str2 = TString("N_revers_anneal_g1_")+TString::Itoa(i,10);
+      TString str3 = TString("N_nadefects_g1_")+TString::Itoa(i,10);
+      TString str4 = TString("N_constdamage_g1_")+TString::Itoa(i,10);
+      TString str5 = TString("N_donor_")+TString::Itoa(i,10);
+      TString str6 = TString("N_eff_")+TString::Itoa(i,10);
+      TString str7 = TString("V_dep_")+TString::Itoa(i,10);
+      TString str8 = TString("fluence")+TString::Itoa(i,10);
+      plot_vectors(time_vector,N_benef_anneal_g1_vec[i],"N_{dep,benef_anneal_g1} [V]","Date [days]",totalDose,str1.Data(),66,output_file_name);
+      plot_vectors(time_vector,N_revers_anneal_g1_vec[i],"N_{dep,revers_anneal_g1} [V]","Date [days]",totalDose,str2.Data(),66,output_file_name);
+      plot_vectors(time_vector,N_nadefects_g1_vec[i],"N_{dep,nadefects_g1} [V]","Date [days]",totalDose,str3.Data(),66,output_file_name);
+      plot_vectors(time_vector,N_constdamage_g1_vec[i],"N_{dep,constdamage_g1} [V]","Date [days]",totalDose,str4.Data(),66,output_file_name);
+      plot_vectors(time_vector,N_donor_vec[i],"N_{dep,donor} [V]","Date [days]",totalDose,str5.Data(),66,output_file_name);
+      plot_vectors(time_vector,fluence_vector[i],"Fluence [n_{eq}/cm^{2}]","Date [days]",totalDose,str8.Data(),2,output_file_name);
+      // plot_vectors(fluence_vector,Neff_vector[i],"N_{eff} [1/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,str6.Data(),3,output_file_name);
+      // plot_vectors(fluence_vector,V_dep_vector[i],"U_{dep} [V]","Fluence [n_{eq}/cm^{2}]",totalDose,str7.Data(),4,output_file_name);
+      // plot_vectors(time_vector,N_donor_stable_donorremoval,"N_{dep,donor_stable_donorremoval} [V]","Date [days]",totalDose,"N_donor_stable_donorremoval",66,output_file_name);
+    }
 
-    plot_vectors(time_vector,N_benef_anneal_g1_vec,"N_{dep,benef_anneal_g1} [V]","Date [days]",totalDose,"N_benef_anneal_g1",66,output_file_name);
-    plot_vectors(time_vector,N_revers_anneal_g1_vec,"N_{dep,revers_anneal_g1} [V]","Date [days]",totalDose,"N_revers_anneal_g1",66,output_file_name);
-    plot_vectors(time_vector,N_nadefects_g1_vec,"N_{dep,nadefects_g1} [V]","Date [days]",totalDose,"N_nadefects_g1",66,output_file_name);
-    plot_vectors(time_vector,N_constdamage_g1_vec,"N_{dep,constdamage_g1} [V]","Date [days]",totalDose,"N_constdamage_g1",66,output_file_name);
-    plot_vectors(time_vector,N_donor_vec,"N_{dep,donor} [V]","Date [days]",totalDose,"N_donor",66,output_file_name);
-    // plot_vectors(time_vector,N_donor_stable_donorremoval,"N_{dep,donor_stable_donorremoval} [V]","Date [days]",totalDose,"N_donor_stable_donorremoval",66,output_file_name);
-
-    plot_vectors(time_vector,sensor->get_alpha_vec(),"#alpha [A/cm]","Date [days]",totalDose,"alpha",2,output_file_name);
-    plot_vectors(time_vector,sensor->get_leakage_current(),"I_{leak} (@21C) [mA/cm^{2}]","Date [days]",totalDose,"I_leak",2,output_file_name);
+    // plot_vectors(time_vector,sensor->get_alpha_vec(),"#alpha [A/cm]","Date [days]",totalDose,"alpha",2,output_file_name);
+    // plot_vectors(time_vector,sensor->get_leakage_current(),"I_{leak} (@21C) [mA/cm^{2}]","Date [days]",totalDose,"I_leak",2,output_file_name);
     // plot_vectors(time_vector,sensor->get_leakage_current(),"I_{leak} (@ -7C) [mA] per module","Date [days]",totalDose,"I_leak_per_module",888,output_file_name);
-    plot_vectors(time_vector,sensor->get_leakage_current(),"I_{leak} (@ -7C) [mA], 1 ROG","Date [days]",totalDose,"I_leak_per_module",888,output_file_name);
-    plot_vectors(time_vector,sensor->get_leakage_current(),"I_{leak} (@userTref) [mA/cm^{3}]","Date [days]",totalDose,"I_leak_volume",8,output_file_name);
-    plot_vectors(time_vector,sensor->get_G_i(),"G_{i} [A/cm^{3}]","Date [days]",totalDose,"G_i",2,output_file_name);
-    plot_vectors(time_vector,sensor->get_powerconsumption(),"P [mW/cm^{2}]","Date [days]",totalDose,"powerconsumption",2,output_file_name);
-    plot_vectors(time_vector,Temperature_vector,"Temperature [K]","Date [days]",totalDose,"temperature",2,output_file_name);
-    plot_vectors(time_vector,cpTemperature_vector,"Temperature [K]","Date [days]",totalDose,"cp_Temperature",2,output_file_name);
-    plot_vectors(time_vector,fluence_vector,"Fluence [n_{eq}/cm^{2}]","Date [days]",totalDose,"fluence",2,output_file_name);
-    plot_vectors(time_vector_data,flux_vector,"Fluence [n_{eq}/cm^{2}/s]","Date [days]",totalDose,"flux",2,output_file_name);
-    plot_vectors(time_vector_data,iLeak_data,"I_{leak} (@ -7C) [mA], 1 ROG","Date [days]",totalDose,"I_leak_per_module_data",999,output_file_name);
-    plot_vectors(time_vector_data,diLeak_data,"dI_{leak} (@ -8.5C) [mA] per module","Date [days]",totalDose,"dI_leak_per_module_data",999,output_file_name);
-
+    // plot_vectors(time_vector,sensor->get_leakage_current(),"I_{leak} (@userTref) [mA/cm^{3}]","Date [days]",totalDose,"I_leak_volume",8,output_file_name);
+    // plot_vectors(time_vector,sensor->get_G_i(),"G_{i} [A/cm^{3}]","Date [days]",totalDose,"G_i",2,output_file_name);
+    // plot_vectors(time_vector,sensor->get_powerconsumption(),"P [mW/cm^{2}]","Date [days]",totalDose,"powerconsumption",2,output_file_name);
+    // plot_vectors(time_vector,Temperature_vector,"Temperature [K]","Date [days]",totalDose,"temperature",2,output_file_name);
+    // plot_vectors(time_vector,cpTemperature_vector,"Temperature [K]","Date [days]",totalDose,"cp_Temperature",2,output_file_name);
+    // plot_vectors(time_vector,fluence_vector,"Fluence [n_{eq}/cm^{2}]","Date [days]",totalDose,"fluence",2,output_file_name);
+    // cout << "AAAAA!!!!" << endl;
+    // plot_vectors(time_vector_data,flux_vector,"Fluence [n_{eq}/cm^{2}/s]","Date [days]",totalDose,"flux",2,output_file_name);
+    // plot_vectors(time_vector_data,iLeak_data,"I_{leak} (@ -7C) [mA] per module","Date [days]",totalDose,"I_leak_per_module_data",999,output_file_name);
+    // plot_vectors(time_vector_data,diLeak_data,"dI_{leak} (@ -8.5C) [mA] per module","Date [days]",totalDose,"dI_leak_per_module_data",999,output_file_name);
     // plots as function of dose
-    plot_vectors(fluence_vector,Neff_vector,"N_{eff} [1/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"Neff_vs_fluence",3,output_file_name);
-    plot_vectors(fluence_vector,Ndonor_vector,"N_{donor} [1/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"Ndonors_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector,Nacceptor_vector,"N_{acceptor} [1/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"Nacceptors_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector,V_dep_vector,"U_{dep} [V]","Fluence [n_{eq}/cm^{2}]",totalDose,"U_dep_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector,sensor->get_alpha_vec(),"#alpha [A/cm]","Fluence [n_{eq}/cm^{2}]",totalDose,"alpha_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector,sensor->get_leakage_current(),"I_{leak} [mA/cm^{2}]","Fluence [n_{eq}/cm^{2}]",totalDose,"I_leak_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector,sensor->get_leakage_current(),"I_{leak} (@21C) [mA] per module","Date [days]",totalDose,"I_leak_per_module_vs_fluence",889,output_file_name);
-    plot_vectors(fluence_vector,sensor->get_leakage_current(),"I_{leak} (@userTref) [mA/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"I_leak_volume_vs_fluence",9,output_file_name);
-    plot_vectors(fluence_vector,sensor->get_G_i(),"G_{i} [A/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"G_i_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector,sensor->get_powerconsumption(),"P [mW/cm^{2}]","Fluence [n_{eq}/cm^{2}]",totalDose,"powerconsumption_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector,Temperature_vector,"Temperature [K]","Fluence [n_{eq}/cm^{2}",totalDose,"temperature_vs_fluence",4,output_file_name);
-    plot_vectors(fluence_vector_data,iLeak_data,"I_{leak} (@ -7C) [mA] per module","Date [days]",totalDose,"I_leak_per_module_data_vs_fluence",9999,output_file_name);
-    plot_vectors(fluence_vector_data,diLeak_data,"dI_{leak} (@ -8.5C) [mA] per module","Date [days]",totalDose,"dI_leak_per_module_data_vs_fluence",9999,output_file_name);
+    // plot_vectors(fluence_vector,Neff_vector,"N_{eff} [1/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"Neff_vs_fluence",3,output_file_name);
+    // plot_vectors(fluence_vector,Ndonor_vector,"N_{donor} [1/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"Ndonors_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector,Nacceptor_vector,"N_{acceptor} [1/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"Nacceptors_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector,V_dep_vector,"U_{dep} [V]","Fluence [n_{eq}/cm^{2}]",totalDose,"U_dep_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector,sensor->get_alpha_vec(),"#alpha [A/cm]","Fluence [n_{eq}/cm^{2}]",totalDose,"alpha_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector,sensor->get_leakage_current(),"I_{leak} [mA/cm^{2}]","Fluence [n_{eq}/cm^{2}]",totalDose,"I_leak_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector,sensor->get_leakage_current(),"I_{leak} (@21C) [mA] per module","Date [days]",totalDose,"I_leak_per_module_vs_fluence",889,output_file_name);
+    // plot_vectors(fluence_vector,sensor->get_leakage_current(),"I_{leak} (@userTref) [mA/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"I_leak_volume_vs_fluence",9,output_file_name);
+    // plot_vectors(fluence_vector,sensor->get_G_i(),"G_{i} [A/cm^{3}]","Fluence [n_{eq}/cm^{2}]",totalDose,"G_i_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector,sensor->get_powerconsumption(),"P [mW/cm^{2}]","Fluence [n_{eq}/cm^{2}]",totalDose,"powerconsumption_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector,Temperature_vector,"Temperature [K]","Fluence [n_{eq}/cm^{2}",totalDose,"temperature_vs_fluence",4,output_file_name);
+    // plot_vectors(fluence_vector_data,iLeak_data,"I_{leak} (@ -7C) [mA] per module","Date [days]",totalDose,"I_leak_per_module_data_vs_fluence",9999,output_file_name);
+    // plot_vectors(fluence_vector_data,diLeak_data,"dI_{leak} (@ -8.5C) [mA] per module","Date [days]",totalDose,"dI_leak_per_module_data_vs_fluence",9999,output_file_name);
 
     return 0;
 }
