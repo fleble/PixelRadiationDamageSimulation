@@ -1,3 +1,12 @@
+// TODO: This documentation is outdated, from this line:
+//     input_file >> timestep >> temp1 >> rad1 >> cpTemp >> iLeak >> diLeak
+// I deduce that the profile file must contain:
+//     duration, temperature, fluence, cooling pipe temperature, leakage current, std leakage current
+// which seems to correspond to what this script does:
+// https://gitlab.cern.ch/dbrzhech/PixelMonitoring/-/blob/b795aaee606c38a91ed9158f1a0addc43f511a7d/getPLC_Tpipe.py
+// Which, unlike the names says, prepares a file with this input.
+// However it does so for FPix, and does not run anymore.
+//
 /*
 Compile Code with: g++ data_processing.cpp -I /path/to/boost/boost_1_62_0 -Wall -std=c++11 -o output `root-config --cflags` `root-config --libs`
 
@@ -83,6 +92,7 @@ double global_layer_conversion=6.262e12;             // IBL
 
 int limit_file_size_input = 0;                       // how many lines should be read from the profile, 0 for everything
 
+// TODO: Understand this scaling, why is it "temporary"?
 float DoseRateScaling=0.0859955711871/8.9275E-02; //temporary scaling for bpix
 // float DoseRateScaling=0.0859955711871/8.9275E-02;                            // this parameter is multiplied to all fluence rates from the input profile
 
@@ -100,8 +110,11 @@ TF1 *Ndonor_neutrals_rev_TF1_approx = new TF1("Ndonor_rev1_TF1","[0]*[1]*x+[3]*T
 
 TF1 *Ndonor_TF1 = new TF1("Ndonor_TF1","[0]*[1]/[2] * ([2]*x+TMath::Exp(-[2]*x)-1) +[3]*(1-TMath::Exp(-[2]*x)) ",0,10000000);
 TF1 *Ndonor_g1_TF1 = new TF1("Ndonor_TF1","[0]/[1] * ([1]*x+TMath::Exp(-[1]*x)-1) +[2]*(1-TMath::Exp(-[1]*x)) ",0,10000000);
+
+// TODO: Update these paths
 TFile *fin = TFile::Open("../PixelMonitoring/FLUKA/fluence_field.root");
 TH2F *fluence = (TH2F*)fin->Get("fluence_allpart_6500GeV_phase1");
+
 struct DataElement
 {
     int duration;
@@ -938,6 +951,7 @@ fluence_2018_begin = nconst_begin_2018/gC_lin
 
     cout << "Profile succesfully read. Length of the profile is: " << max_steps << endl;
 
+    // TODO: Why is this code commented out?
     // double gA_float_min = 0.4e-2;
     // double gA_float_max = 1.4e-2;
     // double gA_float = gA_float_min;
