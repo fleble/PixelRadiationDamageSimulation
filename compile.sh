@@ -1,3 +1,1 @@
-g++ data_processing.cpp -I $CPLUS_INCLUDE_PATH -Wall -std=c++11 -o data_processing `root-config --cflags --libs`
-#g++ test.cpp -I $CPLUS_INCLUDE_PATH -Wall -std=c++11 -o output `root-config --cflags --libs`
-
+g++ run_radiation_damage_simulation.cpp -o run_radiation_damage_simulation -std=c++11 -I${LCG_BASE_PATH}/include -L${LCG_BASE_PATH}/lib -lboost_program_options -Wall `root-config --cflags --libs`
