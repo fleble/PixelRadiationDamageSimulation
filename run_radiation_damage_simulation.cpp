@@ -55,7 +55,7 @@ const double userTrefC = 0.;
 double userTref = 273.15 + userTrefC;                          // set a reference temperature for the volume corrected leakage current plot (it will only effect this one plot!) Now: implemented!
 double bandGap = 1.21;                                 // eV used for scaling temperatures
 
-string startTime = "2017-05-23 14:32:22";
+string startTime = "2018-04-17 09:00:23";
 // date d(2017,May,23);                                  // IBL     //set a date for the plots to begin (to be correct it has to be equal to the beginning of your (!) temp/irr profile)
 boost::posix_time::ptime t1(boost::posix_time::time_from_string(startTime));
 //date d(2011,Feb,11);                               // PIXEL
