@@ -9,6 +9,7 @@
 #include <sstream>                      // to get string into stream
 #include <ctime>
 #include <time.h>
+#include <json/value.h>
 // ROOT
 #include <TFile.h>                      // more root stuff
 #include <TH2D.h>                       // root stuff for file reading
@@ -27,6 +28,7 @@
 #include <boost/date_time/gregorian/gregorian.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/program_options.hpp>
+#include <boost/algorithm/string.hpp>
 
 
 using namespace std;
@@ -37,7 +39,12 @@ namespace po = boost::program_options;
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // TODO: replace all this by arguments
-bool use_CMS_paper_alpha0 = false; //if false: temperature averaging for leakage current calculation a la Moll (theta function for time scale change), if true: use CMS approach of temperature average (attention: constants can only be changed directly in the code in this case)
+// use_CMS_paper_alpha0
+// if false: temperature averaging for leakage current calculation a la Moll
+// (theta function for time scale change)
+// if true: use CMS approach of temperature average
+// attention: constants can only be changed directly in the code in this case
+bool use_CMS_paper_alpha0 = false;
 // begin date: 2017-05-23 14:32:22.210863
 bool debug = true;                                    // additional debugging console outputs
 bool plot_pdf = false;                                  // plots are by default saved as root file, but can also be directly exported as pdf
@@ -128,6 +135,7 @@ bool checkArguments(po::variables_map vm) {
 
 struct DataElement
 {
+    int timestamp;
     int duration;
     float temperature;
     long int doseRate;
@@ -136,13 +144,6 @@ struct DataElement
     float dleakageCurrentData;
 };
 
-double deltaT(double flux) {
-  const double scale=3/1e8;
-  //const double scale=3/2.5e7;
-  return scale*flux;
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //calculate depletion voltage from given effective doping concentration
 
@@ -153,29 +154,27 @@ double NtoV_function(double doping_conc)
     return 1.6021766208e-13/(2*11.68*8.854187817)*fabs(doping_conc)*thickness*thickness;                // q/2*epsilon*epsilon_0 * Neff*D^2
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-class AnnealingConstants {                                         // Class to store a set of annealing specific constants and compute temperature dependent values
-private:
+class AnnealingConstants {     // Class to store a set of annealing specific constants and compute temperature dependent values
+public:
     double gA;
     double gY;
     double gC;
     double ka;
-    double ky1;
+    double ky;
     double Ea;
     double Ey;
     double cc;
 
-public:
+
     AnnealingConstants(double, double, double, double, double, double, double, double);
     AnnealingConstants();
-    double initialize (double, double, double, double, double, double, double, double);
+    void initialize (double, double, double, double, double, double, double, double);
+    void initialize (string);
     double get_gA() const;
     double get_gY() const;
     double get_gC() const;
     double get_ka(int) const;
-    double get_ky1(int) const;
+    double get_ky(int) const;
     double get_Ea() const;
     double get_Ey() const;
     double get_cc() const;
@@ -187,36 +186,91 @@ AnnealingConstants::AnnealingConstants()
     gY = 0.;
     gC = 0.;
     ka = 0.;
-    ky1 = 0.;
+    ky = 0.;
     Ea = 0.;
     Ey = 0.;
     cc = 0.;
 }
 
-AnnealingConstants::AnnealingConstants(double gA, double gY, double gC, double ka,
-                                       double ky1, double Ea, double Ey, double cc)
+AnnealingConstants::AnnealingConstants(double gA_, double gY_, double gC_, double ka_,
+                                       double ky_, double Ea_, double Ey_, double cc_)
 {
-    gA = gA;
-    gY = gY;
-    gC = gC;
-    ka = ka;
-    ky1 = ky1;
-    Ea = Ea;
-    Ey = Ey;
-    cc = cc;
+    gA = gA_;
+    gY = gY_;
+    gC = gC_;
+    ka = ka_;
+    ky = ky_;
+    Ea = Ea_;
+    Ey = Ey_;
+    cc = cc_;
 }
 
-double AnnealingConstants::initialize(double gA, double gY, double gC, double ka,
-                                      double ky1, double Ea, double Ey, double cc)
+void AnnealingConstants::initialize(double gA_, double gY_, double gC_, double ka_,
+                                      double ky_, double Ea_, double Ey_, double cc_)
 {
-    gA = gA;
-    gY = gY;
-    gC = gC;
-    ka = ka;
-    ky1 = ky1;
-    Ea = Ea;
-    Ey = Ey;
-    cc = cc;
+    gA = gA_;
+    gY = gY_;
+    gC = gC_;
+    ka = ka_;
+    ky = ky_;
+    Ea = Ea_;
+    Ey = Ey_;
+    cc = cc_;
+}
+
+void AnnealingConstants::initialize(string filename)
+{
+    ifstream input_file(filename.c_str());
+    if (input_file.is_open())
+    {
+        cout << "Reading annealing constant file: " << filename << endl;
+
+        string line;
+      
+        string quantity;
+        string valueStr;
+        float value;
+
+        bool endOfFile = false;
+        std::size_t found;
+        while (not endOfFile)
+        {
+            if(input_file.eof()) {break;}  // if end of file is reached: brake the loop
+
+            getline (input_file, line);
+           
+            found =  line.find("#");
+            if (found != std::string::npos) {
+                line = line.substr(0, found);
+            }
+            found =  line.find(":");
+            if (found == std::string::npos) {continue;}
+            quantity = line.substr(0, found);
+            valueStr = line.substr(found+1, line.size());
+            found =  valueStr.find(",");
+            if (found != std::string::npos) {
+                valueStr = valueStr.substr(0, found);
+            }
+            boost::trim(quantity);
+            boost::trim(valueStr);
+            value = stod(valueStr);
+
+            if (quantity == "\"gA\"" or quantity == "'gA'") {gA = value;}
+            if (quantity == "\"gY\"" or quantity == "'gY'") {gY = value;}
+            if (quantity == "\"gC\"" or quantity == "'gC'") {gC = value;}
+            if (quantity == "\"ka\"" or quantity == "'ka'") {ka = value;}
+            if (quantity == "\"ky\"" or quantity == "'ky'") {ky = value;}
+            if (quantity == "\"Ea\"" or quantity == "'Ea'") {Ea = value;}
+            if (quantity == "\"Ey\"" or quantity == "'Ey'") {Ey = value;}
+            if (quantity == "\"cc\"" or quantity == "'cc'") {cc = value;}
+        }
+    }
+    else
+    {
+        if(debug) cout << "Error opening the temperature/radiation file!"<<endl;
+    }
+
+    input_file.close();
 }
 
 double AnnealingConstants::get_gA() const
@@ -239,9 +293,9 @@ double AnnealingConstants::get_ka(int T) const
     return ka*exp(-Ea/(8.6173303e-5*(double)T));
 }
 
-double AnnealingConstants::get_ky1(int T) const
+double AnnealingConstants::get_ky(int T) const
 {
-    return ky1*exp(-Ey/(8.6173303e-5*(double)T));
+    return ky*exp(-Ey/(8.6173303e-5*(double)T));
 }
 
 double AnnealingConstants::get_Ea() const
@@ -260,8 +314,6 @@ double AnnealingConstants::get_cc() const
 }
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 // leakage current constants will be stored in this struct
 
 struct LeakageCurrentConstants
@@ -276,16 +328,14 @@ struct LeakageCurrentConstants
 
 void initializeLeakageCurrentConstants(LeakageCurrentConstants& leakageCurrentConstants)
 {
-    leakageCurrentConstants.alpha_1 = 1.23e-17;
-    leakageCurrentConstants.alpha_0_star = 7.07e-17;
-    leakageCurrentConstants.beta = 3.3e-18;
-    leakageCurrentConstants.k01 = 1.2e13;
-    leakageCurrentConstants.E1 = 1.11;
-    leakageCurrentConstants.E1_star = 1.3;
+    leakageCurrentConstants.alpha_1 = 1.23e-17;       //  A/cm  +/- 0.06
+    leakageCurrentConstants.alpha_0_star = 7.07e-17;  //  A/cm
+    leakageCurrentConstants.beta = 3.29e-18;          //  A/cm  +/- 0.18
+    leakageCurrentConstants.k01 = 1.2e13;             //  /s    +5.3/-1.0   (!!!)
+    leakageCurrentConstants.E1 = 1.11;                //  eV    +/- 0.05
+    leakageCurrentConstants.E1_star = 1.3;            //  eV    +/- 0.14
 }
 
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // all atributes of a sensor (like irradiation, doping concentration, leakage currents, etc) will be stored in this class
 
@@ -449,7 +499,17 @@ void Sensor::irradiate(
     double a = 1e-30;
     //calculating the effective doping concentration
     // debug=1;
-    if(debug) cout << duration <<" "<< constants.get_gA()<<" "<<fluence<<" "<<constants.get_ka(temperature)<<" "<<Nacceptor<<" "<< constants.get_gC()<<" "<< constants.get_gY()<<" "<< constants.get_ky1(temperature) <<" "<<Ndonor <<endl;
+    // if(debug) cout << duration <<" "<< constants.get_gA()<<" "<<fluence<<" "<<constants.get_ka(temperature)<<" "<<Nacceptor<<" "<< constants.get_gC()<<" "<< constants.get_gY()<<" "<< constants.get_ky(temperature) <<" "<<Ndonor <<endl;
+    // cout << endl << "Beginning irradiation..." << endl;
+    // cout << "Duration: " << duration << endl;
+    // cout << "Fluence: " << fluence << endl;
+    // cout << "gA: " << constants.get_gA() << endl;
+    // cout << "ka: " << constants.get_ka(temperature) << endl;
+    // cout << "gC: " << constants.get_gC() << endl;
+    // cout << "gY: " << constants.get_gY() << endl;
+    // cout << "ky: " << constants.get_ky(temperature) << endl;
+    // cout << "n_acceptors: " << Nacceptor << endl;
+    // cout << "n_donors: " << Ndonor << endl;
     
     Naccept_rev_TF1->SetParameter(0, constants.get_gA());
     Naccept_rev_TF1->SetParameter(1, fluence);
@@ -466,12 +526,12 @@ void Sensor::irradiate(
   
     Nneutrals_rev_TF1->SetParameter(0, constants.get_gY());
     Nneutrals_rev_TF1->SetParameter(1, fluence);
-    Nneutrals_rev_TF1->SetParameter(2, constants.get_ky1(temperature));
+    Nneutrals_rev_TF1->SetParameter(2, constants.get_ky(temperature));
     Nneutrals_rev_TF1->SetParameter(3, Nneutral_reversible);
   
     Ndonor_neutrals_rev_TF1_approx->SetParameter(0, constants.get_gY());
     Ndonor_neutrals_rev_TF1_approx->SetParameter(1, fluence);
-    Ndonor_neutrals_rev_TF1_approx->SetParameter(2, constants.get_ky1(temperature));
+    Ndonor_neutrals_rev_TF1_approx->SetParameter(2, constants.get_ky(temperature));
     Ndonor_neutrals_rev_TF1_approx->SetParameter(3, Nneutral_reversible);
   
     Ndonor_const_TF1->SetParameter(0, Ndonor_stable_donorremoval);
@@ -480,11 +540,11 @@ void Sensor::irradiate(
   
     Ndonor_TF1->SetParameter(0, constants.get_gY());
     Ndonor_TF1->SetParameter(1, fluence);
-    Ndonor_TF1->SetParameter(2, constants.get_ky1(temperature));
+    Ndonor_TF1->SetParameter(2, constants.get_ky(temperature));
     Ndonor_TF1->SetParameter(3, Nneutral_reversible);
   
   
-    if(constants.get_ka(temperature)>a && constants.get_ky1(temperature)>a)
+    if(constants.get_ka(temperature)>a && constants.get_ky(temperature)>a)
     {
       Nacceptor_reversible             =  Naccept_rev_TF1->Eval(duration);
       Nacceptor_stable_constdamage     +=  Naccept_const_TF1->Eval(duration);
@@ -494,7 +554,7 @@ void Sensor::irradiate(
     }
     else
     {
-      cout << "Potential numerical problem due to ultra low temp and therby caused very small ky1 and ka values. Using approach in order to perform calculation. In general, no problem!"<<endl;
+      cout << "Potential numerical problem due to ultra low temp and therby caused very small ky and ka values. Using approach in order to perform calculation. In general, no problem!"<<endl;
   
       Nacceptor_reversible           =  Naccept_rev_TF1_approx->Eval(duration);
       Nacceptor_stable_constdamage   +=  Naccept_const_TF1->Eval(duration);
@@ -502,21 +562,24 @@ void Sensor::irradiate(
       Ndonor_stable_donorremoval     += Ndonor_const_TF1->Eval(duration);
       Nacceptor_stable_reverseannealing +=  Ndonor_TF1->Eval(duration);
     }
-  
+
     Nconstdamage_g1   = Nacceptor_stable_constdamage/constants.get_gC();
     Nbenef_anneal_g1  = Nacceptor_reversible/constants.get_gA();
     Ndonor_g1_TF1->SetParameter(0, fluence);
-    Ndonor_g1_TF1->SetParameter(1, constants.get_ky1(temperature));
+    Ndonor_g1_TF1->SetParameter(1, constants.get_ky(temperature));
     Ndonor_g1_TF1->SetParameter(2, Nnadefects_g1);
     Nrevers_anneal_g1 += Ndonor_g1_TF1->Eval(duration);
     Nnadefects_g1     = Nneutral_reversible/constants.get_gY();
   
-    // cout << "ka = " << constants.get_ka(temperature) << "; ky1 = " << constants.get_ky1(temperature) << ": " << NtoV_function(Nacceptor_stable_reverseannealing) << " = " << NtoV_function(Nacceptor_stable_reverseannealing_g) << "+" << NtoV_function(Nacceptor_stable_reverseannealing_no_g) <<  endl;
+    // cout << "ka = " << constants.get_ka(temperature) << "; ky = " << constants.get_ky(temperature) << ": " << NtoV_function(Nacceptor_stable_reverseannealing) << " = " << NtoV_function(Nacceptor_stable_reverseannealing_g) << "+" << NtoV_function(Nacceptor_stable_reverseannealing_no_g) <<  endl;
+    // cout << "n_acceptor_reversible: " << Nacceptor_reversible << endl;
+    // cout << "Nacceptor_stable_constdamage: " << Nacceptor_stable_constdamage << endl;
+    // cout << "Nacceptor_stable_reverseannealing: " << Nacceptor_stable_reverseannealing << endl;
     Nacceptor =  Nacceptor_reversible + Nacceptor_stable_constdamage + Nacceptor_stable_reverseannealing;
     Ndonor    =  Ndonor_const         + Ndonor_stable_donorremoval;
   
   
-  //calculating the leackage current in the following part
+    //calculating the leackage current in the following part
   
     vector<double> tmp(3);
     vector<double> tmp2(2);
@@ -525,7 +588,7 @@ void Sensor::irradiate(
     tmp3.at(0) = 0;
     tmp3.at(1) = 0;
   
-  //////////////////////////////
+    //////////////////////////////
     // G_i_tmp needs to be outside of the if clause to be existend also
     // afterwards when it is pushed back in the G_i vector, can be put
     // back to pos1 after finished with the if clauses.
@@ -612,7 +675,8 @@ void Sensor::irradiate(
         // T-ref is hardcoded and fixed, it cannot be changed in a trivial way
         // since the other parameters, especially alpha 0 star were evaluated
         // at this reference temperature!!!
-        tmp2.at(1) = duration / 60. * exp(-leakageCurrentConstants.E1_star * (1.0 / (double)temperature - 1.0/293.15) / (8.6173303e-5));
+        float Tref = 293.15;
+        tmp2.at(1) = duration / 60. * exp(-leakageCurrentConstants.E1_star * (1.0 / (double)temperature - 1.0/Tref) / (8.6173303e-5));
   
         if(time_history.size() > 0.1) 
         {
@@ -621,19 +685,16 @@ void Sensor::irradiate(
   
         tmp2.at(0) += tmp3.at(0);
         tmp2.at(1) += tmp3.at(1);
-  
         time_history.push_back(tmp2);
   
-        //pos1
         int i = 0;
-  
         while (i < leakage_current_alpha.size())
         {
             if (i >= 1)
             {
                 G_i_tmp +=   leakage_current_alpha.at(i).at(0) * exp(-(time_history.back().at(0) - time_history.at(i-1).at(0)))
                            + leakage_current_alpha.at(i).at(1)
-                           - leakage_current_alpha.at(i).at(2) * log(time_history.back().at(1)-time_history.at(i-1).at(1));
+                           - leakage_current_alpha.at(i).at(2) * log(time_history.back().at(1) - time_history.at(i-1).at(1));
             }
             else
             {
@@ -645,13 +706,8 @@ void Sensor::irradiate(
         }
     }
   
-  //////////////////////////////
-  
-  
     G_i.push_back(G_i_tmp);
-    // if(G_i_tmp/(totalDose*1.0e6+(double)fluence+0.001)>5e-16)alpha_vec.push_back(1e-17);    //totalDose was devided by 1e6 to fit into a long double
-    // else alpha_vec.push_back(G_i_tmp/(totalDose*1.0e6+(double)fluence+0.001));
-  
+    
     // TODO: Why these numbers
     double alpha = G_i_tmp / (totalDose + (double)fluence + 0.001);
     if (alpha > 5e-16)
@@ -671,8 +727,6 @@ void Sensor::irradiate(
 }
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 //function to read in the temp/rad profile
 
 double leakageCurrentScale(double leakageCurrent, double T, double Tref, double bandGap){
@@ -686,13 +740,13 @@ vector<DataElement> getProfile(string filename)
     DataElement profileSnapshot;
 
     ifstream input_file(filename.c_str());
-    int lineNumber = 0;
     if (input_file.is_open())
     {
-        if(debug) cout << "Reading temperature/radiation file: " << filename << endl;
+        cout << "Reading temperature/radiation file: " << filename << endl;
 
         string line;
       
+        string fillStr;
         string timestampStr;
         string timestepStr;
         string temperatureStr;
@@ -713,18 +767,22 @@ vector<DataElement> getProfile(string filename)
         bool endOfFile = false;
         while (not endOfFile)
         {
-            input_file >> timestampStr >> timestepStr >> temperatureStr >> doseRateStr >> leakageCurrentStr;
+            input_file >> fillStr >> timestampStr >> timestepStr >> temperatureStr >> doseRateStr >> leakageCurrentStr;
             timestamp = stoi(timestampStr);
             timestep = stoi(timestepStr);
             temperature = stof(temperatureStr);
             doseRate = stol(doseRateStr);
             leakageCurrent = stof(leakageCurrentStr);
 
-            if(debug) cout << timestamp << " " << timestep << " " << temperature << " " << doseRate << " " << leakageCurrent << endl;
+            // TODO: Temporary hack to fix issue in profile preparation
+            // doseRate = doseRate / timestep;
 
+            // if(debug) cout << timestamp << " " << timestep << " " << temperature << " " << doseRate << " " << leakageCurrent << endl;
+
+            profileSnapshot.timestamp = timestamp;
             profileSnapshot.duration = timestep;
             profileSnapshot.doseRate = doseRate * DoseRateScaling;
-            profileSnapshot.temperature = temperature + deltaT(profileSnapshot.doseRate);
+            profileSnapshot.temperature = temperature;
             profileSnapshot.leakageCurrentData = leakageCurrentScale(leakageCurrent, userTref, profileSnapshot.temperature, bandGap);
             profileSnapshot.dleakageCurrentData = leakageCurrentScale(dleakageCurrent, userTref, profileSnapshot.temperature, bandGap);
 
@@ -747,7 +805,7 @@ vector<DataElement> getProfile(string filename)
     }
     else
     {
-        if(debug) cout << "Error opening the temperature/radiation file!"<<endl;
+        cout << "Error opening the temperature/radiation file!"<<endl;
         return profile;
     }
 
@@ -756,11 +814,28 @@ vector<DataElement> getProfile(string filename)
     return profile;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+boost::posix_time::ptime getBeginTime(vector<DataElement> profile)
+{
+    int timestamp = profile.at(0).timestamp;
+    boost::posix_time::ptime beginTime(boost::posix_time::from_time_t(time_t(timestamp)));
+
+    return beginTime;
+} 
+
 
 //function to plot different informations in root and pdf files
 
-void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string xName, long double totalDose, string plotname, int mode, string rootOutputFileName)
+void plot_vectors(
+    vector<double> vecx,
+    vector<double> vecy,
+    string yName,
+    string xName,
+    long double totalDose,
+    string plotname,
+    int mode,
+    boost::posix_time::ptime beginTime,
+    string rootOutputFileName
+)
 {
     string rootOutputFileNamePdf=rootOutputFileName;
     rootOutputFileNamePdf.insert(rootOutputFileNamePdf.size(), "_");
@@ -787,7 +862,7 @@ void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string
             seconds-=minutes*60;
 
             // -------------------------------------
-            boost::posix_time::ptime t2 = t1 + boost::posix_time::hours(hours+day*24)
+            boost::posix_time::ptime t2 = beginTime + boost::posix_time::hours(hours+day*24)
                                              + boost::posix_time::minutes(minutes)
                                              + boost::posix_time::seconds(seconds);
             // date d2 = d + days(day);
@@ -936,10 +1011,6 @@ void plot_vectors(vector<double> vecx, vector<double> vecy, string yName, string
 }
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 int main(int argc, char *argv[]) {
 
     po::variables_map args = parseArguments(argc, argv);
@@ -959,20 +1030,14 @@ int main(int argc, char *argv[]) {
     initializeLeakageCurrentConstants(leakageCurrentConstants);
 
     AnnealingConstants annealingConstants;
-    annealingConstants.initialize(
-        1.4e-2,    // gA
-        6.7e-2,    // gY
-        0.0061566116294,  //gC  0.7e-2
-        2.4e13,    // ka
-        7.4e14,    // ky
-        1.09,      // Ea
-        1.325,     // Ey
-        6.4118e-14 // cc
-    );
+    annealingConstants.initialize("config/annealing_constants.py");
 
     vector<DataElement> profile = getProfile(profileInputFileName);
 
     int max_steps = profile.size();
+    cout << "Profile succesfully read. Length of the profile is: " << max_steps << endl;
+
+    boost::posix_time::ptime beginTime = getBeginTime(profile);
 
     vector<double> V_dep_vector;
     vector<double> Neff_vector;
@@ -1003,8 +1068,6 @@ int main(int argc, char *argv[]) {
     long double totalDose = 0.;
 
     // main loop where all irradiation steps happen
-
-    cout << "Profile succesfully read. Length of the profile is: " << max_steps << endl;
 
     // TODO: Why is this code commented out?
     // double gA_float_min = 0.4e-2;
@@ -1119,7 +1182,7 @@ int main(int argc, char *argv[]) {
         //    && (time < 14722058 || (time > 16450058 && time < 45480458) || time > 48504458)
         if (profile.at(t).leakageCurrentData > 0. && profile.at(t).doseRate > 0.)
         {
-            cout << profile.at(t).leakageCurrentData << endl;
+            // cout << profile.at(t).leakageCurrentData << endl;
             time_vector_data.push_back(time/(24.0*3600.0));
             fluence_vector_data.push_back(totalDose/6.);
             leakageCurrentData.push_back(profile.at(t).leakageCurrentData/1000.);
@@ -1144,46 +1207,48 @@ int main(int argc, char *argv[]) {
     cout << "Processing finished, writing data..." << endl;
 
     // plots as function of time
-    plot_vectors(time_vector, Neff_vector, "N_{eff} [1/cm^{3}]", "Date [days]", totalDose, "Neff", 1, rootOutputFileName);
-    plot_vectors(time_vector, Ndonor_vector, "N_{donor} [1/cm^{3}]", "Date [days]", totalDose, "Ndonors", 2, rootOutputFileName);
-    plot_vectors(time_vector, Nacceptor_vector, "N_{acceptor} [1/cm^{3}]", "Date [days]", totalDose, "Nacceptors", 2, rootOutputFileName);
-    plot_vectors(time_vector, V_dep_vector, "U_{dep} [V]", "Date [days]", totalDose, "U_dep", 66, rootOutputFileName);
+    plot_vectors(time_vector, Neff_vector, "N_{eff} [1/cm^{3}]", "Date [days]", totalDose, "Neff", 1, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, Ndonor_vector, "N_{donor} [1/cm^{3}]", "Date [days]", totalDose, "Ndonors", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, Nacceptor_vector, "N_{acceptor} [1/cm^{3}]", "Date [days]", totalDose, "Nacceptors", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, V_dep_vector, "U_{dep} [V]", "Date [days]", totalDose, "U_dep", 66, beginTime, rootOutputFileName);
 
-    plot_vectors(time_vector, N_benef_anneal_g1_vec, "N_{dep, benef_anneal_g1} [V]", "Date [days]", totalDose, "N_benef_anneal_g1", 66, rootOutputFileName);
-    plot_vectors(time_vector, N_revers_anneal_g1_vec, "N_{dep, revers_anneal_g1} [V]", "Date [days]", totalDose, "N_revers_anneal_g1", 66, rootOutputFileName);
-    plot_vectors(time_vector, N_nadefects_g1_vec, "N_{dep, nadefects_g1} [V]", "Date [days]", totalDose, "N_nadefects_g1", 66, rootOutputFileName);
-    plot_vectors(time_vector, N_constdamage_g1_vec, "N_{dep, constdamage_g1} [V]", "Date [days]", totalDose, "N_constdamage_g1", 66, rootOutputFileName);
-    plot_vectors(time_vector, N_donor_vec, "N_{dep, donor} [V]", "Date [days]", totalDose, "N_donor", 66, rootOutputFileName);
-    // plot_vectors(time_vector, N_donor_stable_donorremoval, "N_{dep, donor_stable_donorremoval} [V]", "Date [days]", totalDose, "N_donor_stable_donorremoval", 66, rootOutputFileName);
+    plot_vectors(time_vector, N_benef_anneal_g1_vec, "N_{dep, benef_anneal_g1} [V]", "Date [days]", totalDose, "N_benef_anneal_g1", 66, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, N_revers_anneal_g1_vec, "N_{dep, revers_anneal_g1} [V]", "Date [days]", totalDose, "N_revers_anneal_g1", 66, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, N_nadefects_g1_vec, "N_{dep, nadefects_g1} [V]", "Date [days]", totalDose, "N_nadefects_g1", 66, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, N_constdamage_g1_vec, "N_{dep, constdamage_g1} [V]", "Date [days]", totalDose, "N_constdamage_g1", 66, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, N_donor_vec, "N_{dep, donor} [V]", "Date [days]", totalDose, "N_donor", 66, beginTime, rootOutputFileName);
+    // plot_vectors(time_vector, N_donor_stable_donorremoval, "N_{dep, donor_stable_donorremoval} [V]", "Date [days]", totalDose, "N_donor_stable_donorremoval", 66, beginTime, rootOutputFileName);
 
-    plot_vectors(time_vector, sensor->get_alpha_vec(), "#alpha [A/cm]", "Date [days]", totalDose, "alpha", 2, rootOutputFileName);
-    plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@21C) [mA/cm^{2}]", "Date [days]", totalDose, "I_leak", 2, rootOutputFileName);
-    // plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@ -7C) [mA] per module", "Date [days]", totalDose, "I_leak_per_module", 888, rootOutputFileName);
-    plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@ -7C) [mA],  1 ROG", "Date [days]", totalDose, "I_leak_per_module", 888, rootOutputFileName);
-    plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@userTref) [mA/cm^{3}]", "Date [days]", totalDose, "I_leak_volume", 8, rootOutputFileName);
-    plot_vectors(time_vector, sensor->get_G_i(), "G_{i} [A/cm^{3}]", "Date [days]", totalDose, "G_i", 2, rootOutputFileName);
-    plot_vectors(time_vector, sensor->get_powerconsumption(), "P [mW/cm^{2}]", "Date [days]", totalDose, "powerconsumption", 2, rootOutputFileName);
-    plot_vectors(time_vector, temperature_vector, "Temperature [K]", "Date [days]", totalDose, "temperature", 2, rootOutputFileName);
-    // plot_vectors(time_vector, cpTemperature_vector, "Temperature [K]", "Date [days]", totalDose, "cp_Temperature", 2, rootOutputFileName);
-    plot_vectors(time_vector, fluence_vector, "Fluence [n_{eq}/cm^{2}]", "Date [days]", totalDose, "fluence", 2, rootOutputFileName);
-    plot_vectors(time_vector_data, flux_vector, "Fluence [n_{eq}/cm^{2}/s]", "Date [days]", totalDose, "flux", 2, rootOutputFileName);
-    plot_vectors(time_vector_data, leakageCurrentData, "I_{leak} (@ -7C) [mA],  1 ROG", "Date [days]", totalDose, "I_leak_per_module_data", 999, rootOutputFileName);
-    plot_vectors(time_vector_data, dleakageCurrentData, "dI_{leak} (@ -8.5C) [mA] per module", "Date [days]", totalDose, "dI_leak_per_module_data", 999, rootOutputFileName);
+    plot_vectors(time_vector, sensor->get_alpha_vec(), "#alpha [A/cm]", "Date [days]", totalDose, "alpha", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@21C) [mA/cm^{2}]", "Date [days]", totalDose, "I_leak", 2, beginTime, rootOutputFileName);
+    // plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@ -7C) [mA] per module", "Date [days]", totalDose, "I_leak_per_module", 888, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@ -7C) [mA],  1 ROG", "Date [days]", totalDose, "I_leak_per_module", 888, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, sensor->get_leakage_current(), "I_{leak} (@userTref) [mA/cm^{3}]", "Date [days]", totalDose, "I_leak_volume", 8, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, sensor->get_G_i(), "G_{i} [A/cm^{3}]", "Date [days]", totalDose, "G_i", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, sensor->get_powerconsumption(), "P [mW/cm^{2}]", "Date [days]", totalDose, "powerconsumption", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, temperature_vector, "Temperature [K]", "Date [days]", totalDose, "temperature", 2, beginTime, rootOutputFileName);
+    // plot_vectors(time_vector, cpTemperature_vector, "Temperature [K]", "Date [days]", totalDose, "cp_Temperature", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector, fluence_vector, "Fluence [n_{eq}/cm^{2}]", "Date [days]", totalDose, "fluence", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector_data, flux_vector, "Fluence [n_{eq}/cm^{2}/s]", "Date [days]", totalDose, "flux", 2, beginTime, rootOutputFileName);
+    plot_vectors(time_vector_data, leakageCurrentData, "I_{leak} (@ -7C) [mA],  1 ROG", "Date [days]", totalDose, "I_leak_per_module_data", 999, beginTime, rootOutputFileName);
+    plot_vectors(time_vector_data, dleakageCurrentData, "dI_{leak} (@ -8.5C) [mA] per module", "Date [days]", totalDose, "dI_leak_per_module_data", 999, beginTime, rootOutputFileName);
 
     // plots as function of dose
-    plot_vectors(fluence_vector, Neff_vector, "N_{eff} [1/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "Neff_vs_fluence", 3, rootOutputFileName);
-    plot_vectors(fluence_vector, Ndonor_vector, "N_{donor} [1/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "Ndonors_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector, Nacceptor_vector, "N_{acceptor} [1/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "Nacceptors_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector, V_dep_vector, "U_{dep} [V]", "Fluence [n_{eq}/cm^{2}]", totalDose, "U_dep_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector, sensor->get_alpha_vec(), "#alpha [A/cm]", "Fluence [n_{eq}/cm^{2}]", totalDose, "alpha_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector, sensor->get_leakage_current(), "I_{leak} [mA/cm^{2}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "I_leak_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector, sensor->get_leakage_current(), "I_{leak} (@21C) [mA] per module", "Date [days]", totalDose, "I_leak_per_module_vs_fluence", 889, rootOutputFileName);
-    plot_vectors(fluence_vector, sensor->get_leakage_current(), "I_{leak} (@userTref) [mA/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "I_leak_volume_vs_fluence", 9, rootOutputFileName);
-    plot_vectors(fluence_vector, sensor->get_G_i(), "G_{i} [A/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "G_i_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector, sensor->get_powerconsumption(), "P [mW/cm^{2}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "powerconsumption_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector, temperature_vector, "Temperature [K]", "Fluence [n_{eq}/cm^{2}", totalDose, "temperature_vs_fluence", 4, rootOutputFileName);
-    plot_vectors(fluence_vector_data, leakageCurrentData, "I_{leak} (@ -7C) [mA] per module", "Date [days]", totalDose, "I_leak_per_module_data_vs_fluence", 9999, rootOutputFileName);
-    plot_vectors(fluence_vector_data, dleakageCurrentData, "dI_{leak} (@ -8.5C) [mA] per module", "Date [days]", totalDose, "dI_leak_per_module_data_vs_fluence", 9999, rootOutputFileName);
+    plot_vectors(fluence_vector, Neff_vector, "N_{eff} [1/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "Neff_vs_fluence", 3, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, Ndonor_vector, "N_{donor} [1/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "Ndonors_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, Nacceptor_vector, "N_{acceptor} [1/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "Nacceptors_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, V_dep_vector, "U_{dep} [V]", "Fluence [n_{eq}/cm^{2}]", totalDose, "U_dep_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, sensor->get_alpha_vec(), "#alpha [A/cm]", "Fluence [n_{eq}/cm^{2}]", totalDose, "alpha_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, sensor->get_leakage_current(), "I_{leak} [mA/cm^{2}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "I_leak_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, sensor->get_leakage_current(), "I_{leak} (@21C) [mA] per module", "Date [days]", totalDose, "I_leak_per_module_vs_fluence", 889, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, sensor->get_leakage_current(), "I_{leak} (@userTref) [mA/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "I_leak_volume_vs_fluence", 9, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, sensor->get_G_i(), "G_{i} [A/cm^{3}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "G_i_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, sensor->get_powerconsumption(), "P [mW/cm^{2}]", "Fluence [n_{eq}/cm^{2}]", totalDose, "powerconsumption_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector, temperature_vector, "Temperature [K]", "Fluence [n_{eq}/cm^{2}", totalDose, "temperature_vs_fluence", 4, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector_data, leakageCurrentData, "I_{leak} (@ -7C) [mA] per module", "Date [days]", totalDose, "I_leak_per_module_data_vs_fluence", 9999, beginTime, rootOutputFileName);
+    plot_vectors(fluence_vector_data, dleakageCurrentData, "dI_{leak} (@ -8.5C) [mA] per module", "Date [days]", totalDose, "dI_leak_per_module_data_vs_fluence", 9999, beginTime, rootOutputFileName);
+
+    cout << rootOutputFileName << " has been created" << endl;
 
     return 0;
 }
